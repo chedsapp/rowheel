@@ -1,0 +1,46 @@
+[package]
+name = "rowheel"
+version = "0.1.0"
+edition = "2021"
+description = "Emulate Xbox controllers through DirectInput devices like steering wheels"
+
+[dependencies]
+# UI
+eframe = "0.29"
+egui = "0.29"
+
+# Input handling
+gilrs = "0.11"
+
+# Serialization for config
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Async/threading
+crossbeam-channel = "0.5"
+
+[target.'cfg(windows)'.dependencies]
+vigem-client = "0.1"
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Devices_HumanInterfaceDevice",
+    "Win32_System_Threading",
+]}
+
+[target.'cfg(target_os = "linux")'.dependencies]
+evdev = "0.13.2"
+libudev = "0.3.0"
+nix = { version = "0.29", features = ["ioctl"] }
+libc = "0.2"
+
+[profile.release]
+opt-level = 3
+lto = true

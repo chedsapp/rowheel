@@ -1,0 +1,75 @@
+mod reader;
+#[cfg(target_os = "linux")]
+pub mod evdev_reader;
+
+pub use reader::*;
+
+use std::collections::HashMap;
+
+/// Represents a physical input device (wheel, pedals, etc.)
+#[derive(Debug, Clone)]
+pub struct InputDevice {
+    pub id: String,
+    pub name: String,
+    pub axes: Vec<AxisInfo>,
+    pub buttons: Vec<ButtonInfo>,
+    pub has_force_feedback: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct AxisInfo {
+    pub code: u32,
+    pub name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ButtonInfo {
+    pub code: u32,
+    pub name: String,
+}
+
+/// Current state of all inputs
+#[derive(Debug, Clone, Default)]
+pub struct InputState {
+    /// Map of device_id -> axis_code -> current value
+    pub axes: HashMap<String, HashMap<u32, f32>>,
+    /// Map of device_id -> button_code -> is_pressed
+    pub buttons: HashMap<String, HashMap<u32, bool>>,
+}
+
+impl InputState {
+    pub fn get_axis(&self, device_id: &str, axis_code: u32) -> Option<f32> {
+        self.axes.get(device_id)?.get(&axis_code).copied()
+    }
+
+    pub fn get_button(&self, device_id: &str, button_code: u32) -> Option<bool> {
+        self.buttons.get(device_id)?.get(&button_code).copied()
+    }
+}
+
+/// Event emitted when an input changes
+#[derive(Debug, Clone)]
+pub enum InputEvent {
+    AxisMoved {
+        device_id: String,
+        device_name: String,
+        axis_code: u32,
+        value: f32,
+    },
+    ButtonPressed {
+        device_id: String,
+        device_name: String,
+        button_code: u32,
+    },
+    ButtonReleased {
+        device_id: String,
+        device_name: String,
+        button_code: u32,
+    },
+    DeviceConnected {
+        device: InputDevice,
+    },
+    DeviceDisconnected {
+        device_id: String,
+    },
+}
