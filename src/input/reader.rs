@@ -183,27 +183,25 @@ impl InputReader {
 
         while let Some(event) = self.gilrs.next_event() {
             match event.event {
-                EventType::AxisChanged(_axis, _value, _code) => {
-                    #[cfg(not(target_os = "linux"))]
-                    {
-                        let device_id = format!("{:?}", event.id);
-                        let gamepad = self.gilrs.gamepad(event.id);
-                        let device_name = gamepad.name().to_string();
-                        let axis_code = axis as u32;
+                #[cfg(not(target_os = "linux"))]
+                EventType::AxisChanged(axis, value, _) => {
+                    let device_id = format!("{:?}", event.id);
+                    let gamepad = self.gilrs.gamepad(event.id);
+                    let device_name = gamepad.name().to_string();
+                    let axis_code = axis as u32;
 
-                        self.state
-                            .axes
-                            .entry(device_id.clone())
-                            .or_default()
-                            .insert(axis_code, value);
+                    self.state
+                        .axes
+                        .entry(device_id.clone())
+                        .or_default()
+                        .insert(axis_code, value);
 
-                        events.push(InputEvent::AxisMoved {
-                            device_id,
-                            device_name,
-                            axis_code,
-                            value,
-                        });
-                    }
+                    events.push(InputEvent::AxisMoved {
+                        device_id,
+                        device_name,
+                        axis_code,
+                        value,
+                    });
                 }
                 EventType::ButtonPressed(_button, code) => {
                     let device_id = format!("{:?}", event.id);
@@ -256,7 +254,7 @@ impl InputReader {
                 _ => {}
             }
         }
-        
+
         #[cfg(target_os = "linux")]
         {
             let mut disconnected_readers = Vec::new();
