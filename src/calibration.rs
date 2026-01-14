@@ -19,6 +19,25 @@ pub enum CalibrationStep {
 }
 
 impl CalibrationStep {
+    pub const TOTAL_STEPS: usize = 12;
+
+    pub fn index(&self) -> usize {
+        match self {
+            Self::Welcome => 0,
+            Self::SteeringLeft => 1,
+            Self::SteeringRight => 2,
+            Self::ThrottlePressed => 3,
+            Self::ThrottleReleased => 4,
+            Self::BrakePressed => 5,
+            Self::BrakeReleased => 6,
+            Self::ClutchPressed => 7,
+            Self::ClutchReleased => 8,
+            Self::ShiftUp => 9,
+            Self::ShiftDown => 10,
+            Self::Complete => 11,
+        }
+    }
+
     pub fn instructions(&self) -> &'static str {
         match self {
             Self::Welcome => "Make sure your wheel and pedals are connected",

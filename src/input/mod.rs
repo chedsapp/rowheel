@@ -32,7 +32,7 @@ pub struct ButtonInfo {
 
 #[derive(Debug, Clone, Default)]
 pub struct InputState {
-    /// Map  device_id -> axis_code -> current value
+    /// device_id -> axis_code -> current value
     pub axes: HashMap<String, HashMap<u32, f32>>,
     /// Same thing but with buttons
     pub buttons: HashMap<String, HashMap<u32, bool>>,

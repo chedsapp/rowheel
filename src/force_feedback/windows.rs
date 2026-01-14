@@ -1,265 +1,17 @@
+use super::directinput_ffi::*;
 use super::{ForceFeedback, RumbleState};
 use std::ffi::c_void;
 use std::ptr;
-use windows::core::{GUID, HRESULT, PCSTR, PCWSTR};
-use windows::Win32::Foundation::{HMODULE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::core::{GUID, PCWSTR};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
-use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LoadLibraryW};
+use windows::Win32::System::LibraryLoader::{GetModuleHandleW, LoadLibraryW};
+
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassW, HWND_MESSAGE, WINDOW_EX_STYLE,
     WINDOW_STYLE, WNDCLASSW,
 };
 
-// GUIDs
-const IID_IDIRECTINPUT8W: GUID = GUID::from_u128(0xbf798031_483a_4da2_aa99_5d64ed369700);
-const GUID_CONSTANT_FORCE: GUID = GUID::from_u128(0x13541c20_8e33_11d0_9ad0_00a0c9a06e35);
-const GUID_XAXIS: GUID = GUID::from_u128(0xa36d02e0_c9f3_11cf_bfc7_444553540000);
-const GUID_YAXIS: GUID = GUID::from_u128(0xa36d02e1_c9f3_11cf_bfc7_444553540000);
-const GUID_ZAXIS: GUID = GUID::from_u128(0xa36d02e2_c9f3_11cf_bfc7_444553540000);
-const GUID_RXAXIS: GUID = GUID::from_u128(0xa36d02f4_c9f3_11cf_bfc7_444553540000);
-const GUID_RYAXIS: GUID = GUID::from_u128(0xa36d02f5_c9f3_11cf_bfc7_444553540000);
-const GUID_RZAXIS: GUID = GUID::from_u128(0xa36d02e3_c9f3_11cf_bfc7_444553540000);
-const GUID_SLIDER: GUID = GUID::from_u128(0xa36d02e4_c9f3_11cf_bfc7_444553540000);
-const GUID_POV: GUID = GUID::from_u128(0xa36d02f2_c9f3_11cf_bfc7_444553540000);
-const GUID_BUTTON: GUID = GUID::from_u128(0xa36d02f0_c9f3_11cf_bfc7_444553540000);
-
-// DirectInput constants
-const DISCL_EXCLUSIVE: u32 = 0x00000001;
-const DISCL_NONEXCLUSIVE: u32 = 0x00000002;
-const DISCL_BACKGROUND: u32 = 0x00000008;
-const DI8DEVCLASS_GAMECTRL: u32 = 4;
-const DIEDFL_FORCEFEEDBACK: u32 = 0x00000100;
-const DIEFF_CARTESIAN: u32 = 0x00000010;
-const DIEFF_OBJECTOFFSETS: u32 = 0x00000002;
-const DIEP_DIRECTION: u32 = 0x00000040;
-const DIEP_TYPESPECIFICPARAMS: u32 = 0x00000100;
-const DIEP_START: u32 = 0x20000000;
-const DI_OK: i32 = 0;
-const DIRECTINPUT_VERSION: u32 = 0x0800;
-const DIPH_DEVICE: u32 = 0;
-const DIPROPAUTOCENTER_OFF: u32 = 0;
-const DIDF_ABSAXIS: u32 = 0x00000001;
-const DIDFT_AXIS: u32 = 0x00000003;
-const DIDFT_BUTTON: u32 = 0x0000000C;
-const DIDFT_POV: u32 = 0x00000010;
-const DIDFT_OPTIONAL: u32 = 0x80000000;
-const DIDFT_ANYINSTANCE: u32 = 0x00FFFF00;
-
-// Callback return type
-#[repr(transparent)]
-#[derive(Clone, Copy)]
-struct DIBOOL(pub i32);
-const DIENUM_CONTINUE: DIBOOL = DIBOOL(1);
-const DIENUM_STOP: DIBOOL = DIBOOL(0);
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct DIDEVICEINSTANCEW {
-    dw_size: u32,
-    guid_instance: GUID,
-    guid_product: GUID,
-    dw_dev_type: u32,
-    tsz_instance_name: [u16; 260],
-    tsz_product_name: [u16; 260],
-    guid_ff_driver: GUID,
-    w_usage_page: u16,
-    w_usage: u16,
-}
-
-#[repr(C)]
-struct DIPROPHEADER {
-    dw_size: u32,
-    dw_header_size: u32,
-    dw_obj: u32,
-    dw_how: u32,
-}
-
-#[repr(C)]
-struct DIPROPDWORD {
-    diph: DIPROPHEADER,
-    dw_data: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct DIOBJECTDATAFORMAT {
-    pguid: *const GUID,
-    dw_ofs: u32,
-    dw_type: u32,
-    dw_flags: u32,
-}
-
-#[repr(C)]
-struct DIDATAFORMAT {
-    dw_size: u32,
-    dw_obj_size: u32,
-    dw_flags: u32,
-    dw_data_size: u32,
-    dw_num_objs: u32,
-    rgodf: *const DIOBJECTDATAFORMAT,
-}
-
-#[repr(C)]
-struct DIEFFECT {
-    dw_size: u32,
-    dw_flags: u32,
-    dw_duration: u32,
-    dw_sample_period: u32,
-    dw_gain: u32,
-    dw_trigger_button: u32,
-    dw_trigger_repeat_interval: u32,
-    c_axes: u32,
-    rgdw_axes: *mut u32,
-    rgl_direction: *mut i32,
-    lp_envelope: *mut c_void,
-    cb_type_specific_params: u32,
-    lp_type_specific_params: *mut c_void,
-    dw_start_delay: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct DICONSTANTFORCE {
-    l_magnitude: i32,
-}
-
-// DIJOYSTATE2 structure - matches the standard DirectInput joystick state
-#[repr(C)]
-struct DIJOYSTATE2 {
-    lx: i32,
-    ly: i32,
-    lz: i32,
-    lrx: i32,
-    lry: i32,
-    lrz: i32,
-    rgl_slider: [i32; 2],
-    rgdw_pov: [u32; 4],
-    rgb_buttons: [u8; 128],
-    lv_x: i32,
-    lv_y: i32,
-    lv_z: i32,
-    lv_rx: i32,
-    lv_ry: i32,
-    lv_rz: i32,
-    rgl_v_slider: [i32; 2],
-    la_x: i32,
-    la_y: i32,
-    la_z: i32,
-    la_rx: i32,
-    la_ry: i32,
-    la_rz: i32,
-    rgl_a_slider: [i32; 2],
-    lf_x: i32,
-    lf_y: i32,
-    lf_z: i32,
-    lf_rx: i32,
-    lf_ry: i32,
-    lf_rz: i32,
-    rgl_f_slider: [i32; 2],
-}
-
-// COM interface definitions
-#[repr(C)]
-struct IDirectInput8WVtbl {
-    query_interface: *const c_void,
-    add_ref: *const c_void,
-    release: unsafe extern "system" fn(*mut IDirectInput8W) -> u32,
-    create_device: unsafe extern "system" fn(
-        *mut IDirectInput8W,
-        *const GUID,
-        *mut *mut IDirectInputDevice8W,
-        *mut c_void,
-    ) -> HRESULT,
-    enum_devices: unsafe extern "system" fn(
-        *mut IDirectInput8W,
-        u32,
-        unsafe extern "system" fn(*const DIDEVICEINSTANCEW, *mut c_void) -> DIBOOL,
-        *mut c_void,
-        u32,
-    ) -> HRESULT,
-}
-
-#[repr(C)]
-struct IDirectInput8W {
-    lpvtbl: *const IDirectInput8WVtbl,
-}
-
-#[repr(C)]
-struct IDirectInputDevice8WVtbl {
-    query_interface: *const c_void,
-    add_ref: *const c_void,
-    release: unsafe extern "system" fn(*mut IDirectInputDevice8W) -> u32,
-    get_capabilities: *const c_void,
-    enum_objects: *const c_void,
-    get_property: *const c_void,
-    set_property: unsafe extern "system" fn(
-        *mut IDirectInputDevice8W,
-        *const GUID,
-        *const DIPROPHEADER,
-    ) -> HRESULT,
-    acquire: unsafe extern "system" fn(*mut IDirectInputDevice8W) -> HRESULT,
-    unacquire: unsafe extern "system" fn(*mut IDirectInputDevice8W) -> HRESULT,
-    get_device_state: *const c_void,
-    get_device_data: *const c_void,
-    set_data_format: unsafe extern "system" fn(*mut IDirectInputDevice8W, *const DIDATAFORMAT) -> HRESULT,
-    set_event_notification: *const c_void,
-    set_cooperative_level: unsafe extern "system" fn(*mut IDirectInputDevice8W, HWND, u32) -> HRESULT,
-    get_object_info: *const c_void,
-    get_device_info: *const c_void,
-    run_control_panel: *const c_void,
-    initialize: *const c_void,
-    create_effect: unsafe extern "system" fn(
-        *mut IDirectInputDevice8W,
-        *const GUID,
-        *const DIEFFECT,
-        *mut *mut IDirectInputEffect,
-        *mut c_void,
-    ) -> HRESULT,
-    enum_effects: *const c_void,
-    get_effect_info: *const c_void,
-    get_force_feedback_state: *const c_void,
-    send_force_feedback_command: *const c_void,
-    enum_created_effect_objects: *const c_void,
-    escape: *const c_void,
-    poll: unsafe extern "system" fn(*mut IDirectInputDevice8W) -> HRESULT,
-}
-
-#[repr(C)]
-struct IDirectInputDevice8W {
-    lpvtbl: *const IDirectInputDevice8WVtbl,
-}
-
-#[repr(C)]
-struct IDirectInputEffectVtbl {
-    query_interface: *const c_void,
-    add_ref: *const c_void,
-    release: unsafe extern "system" fn(*mut IDirectInputEffect) -> u32,
-    initialize: *const c_void,
-    get_effect_guid: *const c_void,
-    get_parameters: *const c_void,
-    set_parameters: unsafe extern "system" fn(*mut IDirectInputEffect, *const DIEFFECT, u32) -> HRESULT,
-    start: unsafe extern "system" fn(*mut IDirectInputEffect, u32, u32) -> HRESULT,
-    stop: unsafe extern "system" fn(*mut IDirectInputEffect) -> HRESULT,
-    get_effect_status: *const c_void,
-    download: *const c_void,
-    unload: unsafe extern "system" fn(*mut IDirectInputEffect) -> HRESULT,
-}
-
-#[repr(C)]
-struct IDirectInputEffect {
-    lpvtbl: *const IDirectInputEffectVtbl,
-}
-
-type DirectInput8CreateFn = unsafe extern "system" fn(
-    HMODULE,
-    u32,
-    *const GUID,
-    *mut *mut IDirectInput8W,
-    *mut c_void,
-) -> HRESULT;
-
-// Static data format definition (equivalent to c_dfDIJoystick2)
-// We store this in a struct to keep the data alive
 struct JoystickDataFormat {
     objects: [DIOBJECTDATAFORMAT; 164],
     format: DIDATAFORMAT,
@@ -375,25 +127,19 @@ pub struct ForceFeedbackDevice {
     available: bool,
     effect_started: bool,
     com_initialized: bool,
-    // Keep these alive for the effect
     axes: [u32; 1],
     directions: [i32; 1],
     constant_force: DICONSTANTFORCE,
-    // Keep data format alive
     _data_format: Option<Box<JoystickDataFormat>>,
-    // Message-only window for DirectInput cooperative level
     message_window: HWND,
 }
 
-/// Creates a message-only window for DirectInput cooperative level.
-/// Message-only windows are invisible and belong to the calling process,
-/// which is required for exclusive device access.
+// For some absolutely disgusting reason we need a message-only window for DirectInput coop level and hide it
 fn create_message_window() -> anyhow::Result<HWND> {
     unsafe {
         let class_name: Vec<u16> = "RoWheelDIWindow\0".encode_utf16().collect();
         let hinstance = GetModuleHandleW(None)?;
 
-        // Window procedure - just pass everything to default handler
         unsafe extern "system" fn wnd_proc(
             hwnd: HWND,
             msg: u32,
@@ -410,7 +156,6 @@ fn create_message_window() -> anyhow::Result<HWND> {
             ..Default::default()
         };
 
-        // RegisterClass may fail if already registered, that's ok
         let _ = RegisterClassW(&wc);
 
         let hwnd = CreateWindowExW(
@@ -459,7 +204,6 @@ impl ForceFeedbackDevice {
             }
         }
 
-        // Create message-only window for DirectInput cooperative level
         match create_message_window() {
             Ok(hwnd) => ff.message_window = hwnd,
             Err(e) => log::warn!("Failed to create message window: {}", e),
@@ -476,12 +220,7 @@ impl ForceFeedbackDevice {
         unsafe {
             let dinput_name: Vec<u16> = "dinput8.dll\0".encode_utf16().collect();
             let hinst = LoadLibraryW(PCWSTR(dinput_name.as_ptr()))?;
-
-            let proc_name = b"DirectInput8Create\0";
-            let create_fn: DirectInput8CreateFn = match GetProcAddress(hinst, PCSTR(proc_name.as_ptr())) {
-                Some(p) => std::mem::transmute(p),
-                None => return Err(anyhow::anyhow!("Failed to get DirectInput8Create")),
-            };
+            let create_fn = get_directinput8_create(hinst)?;
 
             let hmodule = GetModuleHandleW(None)?;
             let hr = create_fn(
@@ -501,7 +240,6 @@ impl ForceFeedbackDevice {
 
             let dev_vtbl = &*(*self.device).lpvtbl;
 
-            // Set data format BEFORE cooperative level and acquire
             let data_format = Box::new(JoystickDataFormat::new());
             let hr = (dev_vtbl.set_data_format)(self.device, data_format.as_ptr());
             if hr.is_err() {
@@ -510,8 +248,7 @@ impl ForceFeedbackDevice {
             self._data_format = Some(data_format);
             log::info!("Data format set");
 
-            // Set cooperative level - EXCLUSIVE required for FF
-            // Use our message-only window which belongs to this process
+            // Bro we HAVE to set this to exclusive background for FF to work properly
             if self.message_window.0.is_null() {
                 return Err(anyhow::anyhow!("No valid window handle for DirectInput"));
             }
@@ -529,10 +266,9 @@ impl ForceFeedbackDevice {
                 log::info!("Cooperative level set (Exclusive|Background)");
             }
 
-            // Disable auto-center BEFORE acquiring - some drivers require this
+            // Disable auto-center BEFORE acquiring - some drivers require this (Thank you hackerkm I love you very much)
             self.disable_auto_center();
 
-            // Acquire the device
             let hr = (dev_vtbl.acquire)(self.device);
             if hr.is_err() {
                 return Err(anyhow::anyhow!("Acquire failed: {:?}", hr));
@@ -627,6 +363,25 @@ impl ForceFeedbackDevice {
         }
     }
 
+    fn build_effect(&mut self) -> DIEFFECT {
+        DIEFFECT {
+            dw_size: std::mem::size_of::<DIEFFECT>() as u32,
+            dw_flags: DIEFF_CARTESIAN | DIEFF_OBJECTOFFSETS,
+            dw_duration: u32::MAX,
+            dw_sample_period: 0,
+            dw_gain: 10000,
+            dw_trigger_button: u32::MAX,
+            dw_trigger_repeat_interval: 0,
+            c_axes: 1,
+            rgdw_axes: self.axes.as_mut_ptr(),
+            rgl_direction: self.directions.as_mut_ptr(),
+            lp_envelope: ptr::null_mut(),
+            cb_type_specific_params: std::mem::size_of::<DICONSTANTFORCE>() as u32,
+            lp_type_specific_params: &mut self.constant_force as *mut _ as *mut c_void,
+            dw_start_delay: 0,
+        }
+    }
+
     fn create_effect(&mut self) -> anyhow::Result<()> {
         unsafe {
             // DIJOFS_X = 0 (offset of X axis in DIJOYSTATE2)
@@ -634,22 +389,7 @@ impl ForceFeedbackDevice {
             self.directions[0] = 0;
             self.constant_force.l_magnitude = 0;
 
-            let effect = DIEFFECT {
-                dw_size: std::mem::size_of::<DIEFFECT>() as u32,
-                dw_flags: DIEFF_CARTESIAN | DIEFF_OBJECTOFFSETS,
-                dw_duration: u32::MAX,
-                dw_sample_period: 0,
-                dw_gain: 10000,
-                dw_trigger_button: u32::MAX,
-                dw_trigger_repeat_interval: 0,
-                c_axes: 1,
-                rgdw_axes: self.axes.as_mut_ptr(),
-                rgl_direction: self.directions.as_mut_ptr(),
-                lp_envelope: ptr::null_mut(),
-                cb_type_specific_params: std::mem::size_of::<DICONSTANTFORCE>() as u32,
-                lp_type_specific_params: &mut self.constant_force as *mut _ as *mut c_void,
-                dw_start_delay: 0,
-            };
+            let effect = self.build_effect();
 
             let dev_vtbl = &*(*self.device).lpvtbl;
             let hr = (dev_vtbl.create_effect)(
@@ -685,29 +425,14 @@ impl ForceFeedbackDevice {
         }
 
         unsafe {
-            // Poll the device first - required by some hardware for FF to work
+            // Sometimes we gotta poll the device first to keep it happy
             let dev_vtbl = &*(*self.device).lpvtbl;
             let _ = (dev_vtbl.poll)(self.device);
 
             self.constant_force.l_magnitude = magnitude;
             self.directions[0] = 0;
 
-            let effect = DIEFFECT {
-                dw_size: std::mem::size_of::<DIEFFECT>() as u32,
-                dw_flags: DIEFF_CARTESIAN | DIEFF_OBJECTOFFSETS,
-                dw_duration: u32::MAX,
-                dw_sample_period: 0,
-                dw_gain: 10000,
-                dw_trigger_button: u32::MAX,
-                dw_trigger_repeat_interval: 0,
-                c_axes: 1,
-                rgdw_axes: self.axes.as_mut_ptr(),
-                rgl_direction: self.directions.as_mut_ptr(),
-                lp_envelope: ptr::null_mut(),
-                cb_type_specific_params: std::mem::size_of::<DICONSTANTFORCE>() as u32,
-                lp_type_specific_params: &mut self.constant_force as *mut _ as *mut c_void,
-                dw_start_delay: 0,
-            };
+            let effect = self.build_effect();
 
             let eff_vtbl = &*(*self.effect).lpvtbl;
             let flags = DIEP_DIRECTION | DIEP_TYPESPECIFICPARAMS | DIEP_START;
@@ -752,7 +477,6 @@ impl ForceFeedback for ForceFeedbackDevice {
             let eff_vtbl = &*(*self.effect).lpvtbl;
             let _ = (eff_vtbl.stop)(self.effect);
             self.effect_started = false;
-            log::debug!("Force effect stopped");
         }
 
         Ok(())
@@ -785,7 +509,7 @@ impl Drop for ForceFeedbackDevice {
                 (vtbl.release)(self.dinput);
             }
 
-            // Destroy the message-only window
+            // Kill the god awful window we created for DirectInput
             if !self.message_window.0.is_null() {
                 let _ = DestroyWindow(self.message_window);
             }

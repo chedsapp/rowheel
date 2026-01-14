@@ -21,7 +21,7 @@ pub struct InputReader {
 
 impl InputReader {
     pub fn new() -> anyhow::Result<Self> {
-        // Disable default filters to remove the built-in 5% deadzone that gilrs applies
+        // We need to turn off the gilrs filters because it applies this incredibly dumbass 0.05 deadzone (thank u jasiah)
         let gilrs = GilrsBuilder::new()
             .with_default_filters(false)
             .build()
@@ -89,7 +89,6 @@ impl InputReader {
         log::info!("Searching for device path for: {} (Vendor: {:?}, Product: {:?})",
                    gamepad.name(), gamepad.vendor_id(), gamepad.product_id());
 
-        // First try udev-based search (works for physical devices)
         let mut enumerator = libudev::Enumerator::new(&self.udev).ok()?;
         enumerator.match_subsystem("input").ok()?;
 
@@ -120,7 +119,6 @@ impl InputReader {
             }
         }
 
-        // Udev search failed - try direct evdev scan (works for virtual devices)
         log::debug!("Udev search failed, trying direct evdev scan for: {}", gamepad.name());
 
         let target_name = gamepad.name();
@@ -128,7 +126,6 @@ impl InputReader {
             let entry = entry.ok()?;
             let path = entry.path();
 
-            // Only check event devices
             if !path.file_name()
                 .and_then(|n| n.to_str())
                 .map(|n| n.starts_with("event"))
@@ -137,7 +134,6 @@ impl InputReader {
                 continue;
             }
 
-            // Try to open and read device name
             if let Ok(file) = std::fs::File::open(&path) {
                 let fd = file.as_raw_fd();
                 let mut name_buf = [0u8; EVIOCGNAME_LEN];
@@ -172,7 +168,6 @@ impl InputReader {
     fn get_axes_info(&self, gamepad: &gilrs::Gamepad) -> Vec<AxisInfo> {
         let mut axes = Vec::new();
 
-        // Check all known axis types
         let axis_list = [
             (Axis::LeftStickX, "Left Stick X"),
             (Axis::LeftStickY, "Left Stick Y"),
@@ -187,7 +182,6 @@ impl InputReader {
 
         for (axis, name) in axis_list {
             if let Some(data) = gamepad.axis_data(axis) {
-                // Use the raw code from axis_code() for consistency with event handling
                 let code = gamepad.axis_code(axis)
                     .map(|c| c.into_u32())
                     .unwrap_or(axis as u32);
@@ -200,8 +194,8 @@ impl InputReader {
             }
         }
 
-        // On Windows, also check for analog buttons that act as axes (sliders, triggers)
-        // These come through as ButtonChanged events with analog values
+        // On Windows, also check for analog buttons that act as axes (Thank you hackerkm for noticing this btw...)
+        // These appear to come through as ButtonChanged events with analog values
         #[cfg(not(target_os = "linux"))]
         {
             let analog_button_list = [

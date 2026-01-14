@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+// Configs lowkey don't work rn but if someone could fix then please pr :D
+
 const CONFIG_FILENAME: &str = "rowheel_config.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

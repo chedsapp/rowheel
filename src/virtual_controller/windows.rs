@@ -70,17 +70,15 @@ impl VirtualController for VirtualXboxController {
             return Ok(());
         }
 
-        // Convert axes to i16 range (-32768 to 32767)
         let thumb_lx = (state.left_stick_x * 32767.0) as i16;
         let thumb_ly = (state.left_stick_y * 32767.0) as i16;
         let thumb_rx = (state.right_stick_x * 32767.0) as i16;
         let thumb_ry = (state.right_stick_y * 32767.0) as i16;
 
-        // Convert triggers to u8 range (0 to 255)
         let left_trigger = (state.left_trigger * 255.0) as u8;
         let right_trigger = (state.right_trigger * 255.0) as u8;
 
-        // Build button mask by OR'ing individual button bits
+        // vigem-client wants us to or together all button flags
         let mut button_flags: u16 = 0;
         if state.buttons.a { button_flags |= XButtons::A; }
         if state.buttons.b { button_flags |= XButtons::B; }
@@ -129,10 +127,9 @@ impl VirtualController for VirtualXboxController {
 
 impl Drop for VirtualXboxController {
     fn drop(&mut self) {
-        // Unplug the target first, which will cause the notification thread to exit
+        // Exit notification thread
         let _ = self.target.unplug();
-
-        // Wait for the notification thread to finish
+        
         if let Some(thread) = self.notification_thread.take() {
             let _ = thread.join();
         }

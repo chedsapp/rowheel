@@ -97,7 +97,6 @@ impl ForceFeedbackDevice {
                         self.device = Some(device);
                         self.available = true;
 
-                        // Create the constant force effect
                         if let Err(e) = self.create_constant_effect() {
                             log::warn!("Failed to create constant force effect for auto-detected device: {}", e);
                             self.device = None;
@@ -122,33 +121,17 @@ impl ForceFeedback for ForceFeedbackDevice {
             return Ok(());
         }
 
-        // Ensure the constant effect is initialized
         if self.constant_effect.is_none() {
-            log::debug!("Constant force effect not yet created, creating now.");
             self.create_constant_effect()?;
         }
 
-        // Convert Xbox controller motor values to constant force
-        // large_motor (0.0-1.0) → rightward force (positive)
-        // small_motor (0.0-1.0) → leftward force (negative)
-        // Combined: level = (large - small) * 32767
-        //
-        // Examples:
-        //   large=1.0, small=0.0 → level=+32767 (full right)
-        //   large=0.0, small=1.0 → level=-32767 (full left)
-        //   large=0.5, small=0.0 → level=+16383 (half right)
-        //   large=0.0, small=0.0 → level=0 (no force)
         let large_clamped = rumble.large_motor.clamp(0.0, 1.0);
         let small_clamped = rumble.small_motor.clamp(0.0, 1.0);
         let force_level = ((large_clamped - small_clamped) * 32767.0) as i16;
 
-        log::debug!("Applying constant force to wheel: large={:.3}, small={:.3} → level={}",
-                   rumble.large_motor, rumble.small_motor, force_level);
-
         if let Some(ref mut effect) = self.constant_effect {
-            // Update the effect with the new force level
             let effect_data = FFEffectData {
-                direction: 16384, // East (0x4000) - horizontal axis for steering wheel
+                direction: 16384, // East (0x4000)
                 trigger: FFTrigger::default(),
                 replay: FFReplay {
                     length: 0, // Infinite duration
@@ -165,11 +148,9 @@ impl ForceFeedback for ForceFeedbackDevice {
                 },
             };
 
-            // Update the effect with new parameters
             effect.update(effect_data)
                 .map_err(|e| anyhow::anyhow!("Failed to update constant force effect: {}", e))?;
 
-            // Start the effect only once (play(1) = play once, but with length=0 it runs indefinitely)
             if !self.effect_playing {
                 log::info!("Starting constant force effect playback");
                 effect.play(1)
@@ -190,9 +171,6 @@ impl ForceFeedback for ForceFeedbackDevice {
         if let Some(mut effect) = self.constant_effect.take() {
             effect.stop()
                 .map_err(|e| anyhow::anyhow!("Failed to stop effect: {}", e))?;
-
-            // Effect is automatically erased when dropped
-            log::debug!("Stopped constant force effect");
         }
 
         self.effect_playing = false;
