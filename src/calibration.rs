@@ -2,50 +2,37 @@ use crate::config::{AxisBinding, ButtonBinding, WheelConfig};
 use crate::input::InputEvent;
 use std::collections::HashMap;
 
-/// The current step in the calibration wizard
 #[derive(Debug, Clone, PartialEq)]
 pub enum CalibrationStep {
-    /// Welcome screen
     Welcome,
-    /// Steering wheel calibration - turn left
     SteeringLeft,
-    /// Steering wheel calibration - turn right
     SteeringRight,
-    /// Throttle calibration - press fully
     ThrottlePressed,
-    /// Throttle calibration - release
     ThrottleReleased,
-    /// Brake calibration - press fully
     BrakePressed,
-    /// Brake calibration - release
     BrakeReleased,
-    /// Clutch calibration - press fully (optional)
     ClutchPressed,
-    /// Clutch calibration - release (optional)
     ClutchReleased,
-    /// Shift up button
     ShiftUp,
-    /// Shift down button
     ShiftDown,
-    /// Calibration complete
     Complete,
 }
 
 impl CalibrationStep {
     pub fn instructions(&self) -> &'static str {
         match self {
-            Self::Welcome => "Welcome to RoWheel calibration! Click NEXT to begin.",
-            Self::SteeringLeft => "Turn the steering wheel all the way to the LEFT, then click NEXT.",
-            Self::SteeringRight => "Turn the steering wheel all the way to the RIGHT, then click NEXT.",
-            Self::ThrottlePressed => "Press the THROTTLE pedal all the way down, then click NEXT.",
-            Self::ThrottleReleased => "Release the THROTTLE pedal completely, then click NEXT.",
-            Self::BrakePressed => "Press the BRAKE pedal all the way down, then click NEXT.",
-            Self::BrakeReleased => "Release the BRAKE pedal completely, then click NEXT.",
-            Self::ClutchPressed => "Press the CLUTCH pedal all the way down, then click NEXT.\n(Or click SKIP if you don't have a clutch)",
-            Self::ClutchReleased => "Release the CLUTCH pedal completely, then click NEXT.",
-            Self::ShiftUp => "Press the SHIFT UP button/paddle, then click NEXT.",
-            Self::ShiftDown => "Press the SHIFT DOWN button/paddle, then click NEXT.",
-            Self::Complete => "Calibration complete! Your configuration has been saved.",
+            Self::Welcome => "Make sure your wheel and pedals are connected",
+            Self::SteeringLeft => "Turn the steering wheel all the way to the LEFT, then continue",
+            Self::SteeringRight => "Turn the steering wheel all the way to the RIGHT, then continue",
+            Self::ThrottlePressed => "Press the THROTTLE pedal all the way down, then continue",
+            Self::ThrottleReleased => "Release the THROTTLE pedal completely, then continue",
+            Self::BrakePressed => "Press the BRAKE pedal all the way down, then continue",
+            Self::BrakeReleased => "Release the BRAKE pedal completely, then continue",
+            Self::ClutchPressed => "Press the CLUTCH pedal all the way down, then continue.\n(Or skip if you don't have a clutch)",
+            Self::ClutchReleased => "Release the CLUTCH pedal completely, then continue",
+            Self::ShiftUp => "Press the SHIFT UP button/paddle, then continue",
+            Self::ShiftDown => "Press the SHIFT DOWN button/paddle, then continue",
+            Self::Complete => "Successfully calibrated",
         }
     }
 
@@ -79,7 +66,7 @@ impl CalibrationStep {
     }
 }
 
-/// Tracks axis movement during calibration to find the most moved axis
+// Tracker for axis movement
 #[derive(Debug, Clone)]
 struct AxisTracker {
     device_id: String,
@@ -95,16 +82,13 @@ impl AxisTracker {
     }
 }
 
-/// Calibration state machine
 pub struct CalibrationWizard {
     pub step: CalibrationStep,
     pub config: WheelConfig,
 
-    // Tracking for axis calibration
     axis_trackers: HashMap<(String, u32), AxisTracker>,
     captured_axis: Option<(String, String, u32, f32)>, // device_id, device_name, axis_code, value
 
-    // Tracking for button calibration
     captured_button: Option<(String, String, u32)>, // device_id, device_name, button_code
 }
 
@@ -119,7 +103,6 @@ impl CalibrationWizard {
         }
     }
 
-    /// Process an input event during calibration
     pub fn process_event(&mut self, event: &InputEvent) {
         match event {
             InputEvent::AxisMoved { device_id, device_name, axis_code, value } => {
@@ -148,14 +131,12 @@ impl CalibrationWizard {
         }
     }
 
-    /// Get the most moved axis since tracking started
     fn get_most_moved_axis(&self) -> Option<&AxisTracker> {
         self.axis_trackers.values()
             .max_by(|a, b| a.movement().partial_cmp(&b.movement()).unwrap())
-            .filter(|a| a.movement() > 0.1) // Minimum movement threshold
+            .filter(|a| a.movement() > 0.025)
     }
 
-    /// Capture the current axis position for the current step
     pub fn capture_axis_position(&mut self) {
         if let Some(tracker) = self.get_most_moved_axis() {
             self.captured_axis = Some((
@@ -167,7 +148,6 @@ impl CalibrationWizard {
         }
     }
 
-    /// Advance to the next step, saving calibration data
     pub fn advance(&mut self) {
         self.capture_axis_position();
 
@@ -179,7 +159,7 @@ impl CalibrationWizard {
                         device_name,
                         axis_code,
                         min_value: value,
-                        max_value: value, // Will be updated in SteeringRight
+                        max_value: value, // Will be updated in SteeringRight so not rn
                         inverted: false,
                     });
                 }
@@ -189,7 +169,7 @@ impl CalibrationWizard {
                     (&mut self.config.steering, self.captured_axis.take())
                 {
                     steering.max_value = value;
-                    // Check if inverted (left should be less than right for -1 to 1 mapping)
+                    // Inverted? (left should be less than right)
                     if steering.min_value > steering.max_value {
                         std::mem::swap(&mut steering.min_value, &mut steering.max_value);
                         steering.inverted = true;
@@ -212,12 +192,10 @@ impl CalibrationWizard {
                 if let (Some(ref mut throttle), Some((_, _, _, value))) =
                     (&mut self.config.throttle, self.captured_axis.take())
                 {
-                    // Released position is the "min" (0%), pressed is "max" (100%)
                     let pressed_value = throttle.max_value;
                     throttle.min_value = value;
                     throttle.max_value = pressed_value;
 
-                    // Ensure proper direction
                     if throttle.min_value > throttle.max_value {
                         std::mem::swap(&mut throttle.min_value, &mut throttle.max_value);
                         throttle.inverted = true;
@@ -295,7 +273,6 @@ impl CalibrationWizard {
                 }
             }
             CalibrationStep::Complete => {
-                // Save config
                 if let Err(e) = self.config.save() {
                     log::error!("Failed to save config: {}", e);
                 }
@@ -303,7 +280,7 @@ impl CalibrationWizard {
             _ => {}
         }
 
-        // Reset trackers for next step
+        // Reset all the trackers for next step
         self.axis_trackers.clear();
         self.captured_axis = None;
         self.captured_button = None;
@@ -311,7 +288,6 @@ impl CalibrationWizard {
         self.step = self.step.next();
     }
 
-    /// Skip the current step (for optional steps)
     pub fn skip(&mut self) {
         self.axis_trackers.clear();
         self.captured_axis = None;
@@ -320,11 +296,11 @@ impl CalibrationWizard {
         self.step = self.step.skip_clutch();
     }
 
-    /// Get info about the detected axis for display
+    /// Get info about the detected axis for ui
     pub fn get_detected_axis_info(&self) -> Option<String> {
         self.get_most_moved_axis().map(|tracker| {
             format!(
-                "{} - Axis {} (movement: {:.2})",
+                "{} - Axis {} (movement: {:.4})",
                 tracker.device_name,
                 tracker.axis_code,
                 tracker.movement()
@@ -332,14 +308,14 @@ impl CalibrationWizard {
         })
     }
 
-    /// Get info about the detected button for display
+    /// Get info about the detected button for ui
     pub fn get_detected_button_info(&self) -> Option<String> {
         self.captured_button.as_ref().map(|(_, name, code)| {
             format!("{} - Button {}", name, code)
         })
     }
 
-    /// Check if we're in a step that needs axis detection
+    /// Are we in a step that needs axis detection?
     pub fn needs_axis_detection(&self) -> bool {
         matches!(
             self.step,
@@ -354,7 +330,7 @@ impl CalibrationWizard {
         )
     }
 
-    /// Check if we're in a step that needs button detection
+    /// Are we in a step that needs button detection?
     pub fn needs_button_detection(&self) -> bool {
         matches!(
             self.step,

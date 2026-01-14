@@ -6,7 +6,7 @@ pub use reader::*;
 
 use std::collections::HashMap;
 
-/// Represents a physical input device (wheel, pedals, etc.)
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct InputDevice {
     pub id: String,
@@ -16,24 +16,25 @@ pub struct InputDevice {
     pub has_force_feedback: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct AxisInfo {
     pub code: u32,
     pub name: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ButtonInfo {
     pub code: u32,
     pub name: String,
 }
 
-/// Current state of all inputs
 #[derive(Debug, Clone, Default)]
 pub struct InputState {
-    /// Map of device_id -> axis_code -> current value
+    /// Map  device_id -> axis_code -> current value
     pub axes: HashMap<String, HashMap<u32, f32>>,
-    /// Map of device_id -> button_code -> is_pressed
+    /// Same thing but with buttons
     pub buttons: HashMap<String, HashMap<u32, bool>>,
 }
 
@@ -47,7 +48,7 @@ impl InputState {
     }
 }
 
-/// Event emitted when an input changes
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum InputEvent {
     AxisMoved {

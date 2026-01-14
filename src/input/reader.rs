@@ -1,5 +1,7 @@
 use super::{AxisInfo, ButtonInfo, InputDevice, InputEvent, InputState};
-use gilrs::{Axis, Button, EventType, Gilrs, GamepadId};
+use gilrs::{Axis, Button, EventType, Gilrs, GilrsBuilder};
+#[cfg(target_os = "linux")]
+use gilrs::GamepadId;
 use std::collections::HashMap;
 
 #[cfg(target_os = "linux")]
@@ -19,7 +21,11 @@ pub struct InputReader {
 
 impl InputReader {
     pub fn new() -> anyhow::Result<Self> {
-        let gilrs = Gilrs::new().map_err(|e| anyhow::anyhow!("Failed to initialize gilrs: {}", e))?;
+        // Disable default filters to remove the built-in 5% deadzone that gilrs applies
+        let gilrs = GilrsBuilder::new()
+            .with_default_filters(false)
+            .build()
+            .map_err(|e| anyhow::anyhow!("Failed to initialize gilrs: {}", e))?;
 
         let mut reader = Self {
             gilrs,
@@ -43,12 +49,15 @@ impl InputReader {
 
         for (id, gamepad) in self.gilrs.gamepads() {
             let device_id = format!("{:?}", id);
+            
+            let has_ff = gamepad.is_ff_supported();
+
             let device = InputDevice {
                 id: device_id.clone(),
                 name: gamepad.name().to_string(),
                 axes: self.get_axes_info(&gamepad),
                 buttons: Self::get_buttons_info(&gamepad),
-                has_force_feedback: gamepad.is_ff_supported(),
+                has_force_feedback: has_ff,
             };
 
             log::info!("Found device: {} ({}) - FF: {}",
@@ -72,7 +81,15 @@ impl InputReader {
 
     #[cfg(target_os = "linux")]
     fn find_device_path(&self, gamepad: &gilrs::Gamepad) -> Option<PathBuf> {
-        log::info!("Searching for device path for: {} (Vendor: {:?}, Product: {:?})", gamepad.name(), gamepad.vendor_id(), gamepad.product_id());
+        use std::ffi::CStr;
+        use std::os::unix::io::AsRawFd;
+
+        const EVIOCGNAME_LEN: usize = 256;
+
+        log::info!("Searching for device path for: {} (Vendor: {:?}, Product: {:?})",
+                   gamepad.name(), gamepad.vendor_id(), gamepad.product_id());
+
+        // First try udev-based search (works for physical devices)
         let mut enumerator = libudev::Enumerator::new(&self.udev).ok()?;
         enumerator.match_subsystem("input").ok()?;
 
@@ -89,12 +106,12 @@ impl InputReader {
                 .or(device.property_value("ID_MODEL_ID"))
                 .and_then(|s| s.to_str())
                 .and_then(|s| u16::from_str_radix(s, 16).ok());
-            
+
             log::debug!("  udev vendor: {:?}, product: {:?}", vendor_id, product_id);
             log::debug!("  gilrs vendor: {:?}, product: {:?}", gamepad.vendor_id(), gamepad.product_id());
 
             if vendor_id == gamepad.vendor_id() && product_id == gamepad.product_id() {
-                 if let Some(devnode) = device.devnode() {
+                if let Some(devnode) = device.devnode() {
                     log::info!("Found matching device with devnode: {}", devnode.to_string_lossy());
                     if devnode.to_string_lossy().contains("event") {
                         return Some(devnode.to_path_buf());
@@ -102,7 +119,52 @@ impl InputReader {
                 }
             }
         }
-        
+
+        // Udev search failed - try direct evdev scan (works for virtual devices)
+        log::debug!("Udev search failed, trying direct evdev scan for: {}", gamepad.name());
+
+        let target_name = gamepad.name();
+        for entry in std::fs::read_dir("/dev/input").ok()? {
+            let entry = entry.ok()?;
+            let path = entry.path();
+
+            // Only check event devices
+            if !path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with("event"))
+                .unwrap_or(false)
+            {
+                continue;
+            }
+
+            // Try to open and read device name
+            if let Ok(file) = std::fs::File::open(&path) {
+                let fd = file.as_raw_fd();
+                let mut name_buf = [0u8; EVIOCGNAME_LEN];
+
+                let result = unsafe {
+                    libc::ioctl(
+                        fd,
+                        (0x80004506 | ((EVIOCGNAME_LEN as u64) << 16)) as libc::c_ulong,
+                        name_buf.as_mut_ptr()
+                    )
+                };
+
+                if result >= 0 {
+                    if let Ok(device_name) = CStr::from_bytes_until_nul(&name_buf) {
+                        if let Ok(device_name_str) = device_name.to_str() {
+                            log::debug!("Checking device {}: name=\"{}\"", path.display(), device_name_str);
+
+                            if device_name_str == target_name {
+                                log::info!("Found matching device via direct scan: {}", path.display());
+                                return Some(path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         log::warn!("Device path not found for: {}", gamepad.name());
         None
     }
@@ -110,27 +172,66 @@ impl InputReader {
     fn get_axes_info(&self, gamepad: &gilrs::Gamepad) -> Vec<AxisInfo> {
         let mut axes = Vec::new();
 
+        // Check all known axis types
         let axis_list = [
             (Axis::LeftStickX, "Left Stick X"),
             (Axis::LeftStickY, "Left Stick Y"),
+            (Axis::LeftZ, "Left Z / Brake"),
             (Axis::RightStickX, "Right Stick X"),
             (Axis::RightStickY, "Right Stick Y"),
-            (Axis::LeftZ, "Left Z"),
-            (Axis::RightZ, "Right Z"),
+            (Axis::RightZ, "Right Z / Gas"),
             (Axis::DPadX, "DPad X"),
             (Axis::DPadY, "DPad Y"),
             (Axis::Unknown, "Unknown"),
         ];
 
         for (axis, name) in axis_list {
-            if gamepad.axis_data(axis).is_some() {
+            if let Some(data) = gamepad.axis_data(axis) {
+                // Use the raw code from axis_code() for consistency with event handling
+                let code = gamepad.axis_code(axis)
+                    .map(|c| c.into_u32())
+                    .unwrap_or(axis as u32);
+                log::info!("  Found axis: {} (code: {}, value: {})", name, code, data.value());
+
                 axes.push(AxisInfo {
-                    code: axis as u32,
+                    code,
                     name: name.to_string(),
                 });
             }
         }
 
+        // On Windows, also check for analog buttons that act as axes (sliders, triggers)
+        // These come through as ButtonChanged events with analog values
+        #[cfg(not(target_os = "linux"))]
+        {
+            let analog_button_list = [
+                (Button::LeftTrigger2, "Left Trigger / Slider"),
+                (Button::RightTrigger2, "Right Trigger / Slider"),
+                (Button::C, "C / Slider"),
+                (Button::Z, "Z / Slider"),
+                (Button::Unknown, "Unknown Slider"),
+            ];
+
+            for (button, name) in analog_button_list {
+                if let Some(data) = gamepad.button_data(button) {
+                    // Check if this button has analog values (not just 0/1)
+                    let value = data.value();
+                    if let Some(raw_code) = gamepad.button_code(button) {
+                        // Use high bit to distinguish from regular axes
+                        let code = raw_code.into_u32() | 0x80000000;
+                        log::info!("  Found analog button/slider: {} (code: {:#x}, value: {})",
+                                   name, code, value);
+
+                        axes.push(AxisInfo {
+                            code,
+                            name: format!("{} (Slider)", name),
+                        });
+                    }
+                }
+            }
+        }
+
+        log::info!("Device {} has {} axes", gamepad.name(), axes.len());
         axes
     }
 
@@ -155,17 +256,23 @@ impl InputReader {
             (Button::DPadLeft, "DPad Left"),
             (Button::DPadRight, "DPad Right"),
             (Button::Mode, "Mode"),
+            (Button::Unknown, "Unknown"),
+            (Button::C, "C"),
+            (Button::Z, "Z"),
         ];
 
         for (button, name) in button_list {
-            if gamepad.button_data(button).is_some() {
+            if let Some(data) = gamepad.button_data(button) {
+                let code = button as u32;
+                log::info!("  Found button: {} (code: {}, pressed: {})", name, code, data.is_pressed());
                 buttons.push(ButtonInfo {
-                    code: button as u32,
+                    code,
                     name: name.to_string(),
                 });
             }
         }
 
+        log::info!("Device {} has {} buttons", gamepad.name(), buttons.len());
         buttons
     }
 
@@ -182,13 +289,19 @@ impl InputReader {
         let mut refresh_needed = false;
 
         while let Some(event) = self.gilrs.next_event() {
+            log::trace!("Gilrs event: {:?}", event.event);
+
             match event.event {
                 #[cfg(not(target_os = "linux"))]
-                EventType::AxisChanged(axis, value, _) => {
+                EventType::AxisChanged(axis, value, code) => {
                     let device_id = format!("{:?}", event.id);
                     let gamepad = self.gilrs.gamepad(event.id);
                     let device_name = gamepad.name().to_string();
-                    let axis_code = axis as u32;
+                    // Use raw code for better compatibility with sliders and non-standard axes
+                    let axis_code = code.into_u32();
+
+                    log::debug!("Axis changed: {:?} (raw code: {}) = {} on {}",
+                               axis, axis_code, value, device_name);
 
                     self.state
                         .axes
@@ -203,11 +316,39 @@ impl InputReader {
                         value,
                     });
                 }
-                EventType::ButtonPressed(_button, code) => {
+                // Handle analog buttons (sliders, triggers) as axes on Windows
+                // gilrs often maps sliders to ButtonChanged events with analog values
+                #[cfg(not(target_os = "linux"))]
+                EventType::ButtonChanged(button, value, code) => {
+                    let device_id = format!("{:?}", event.id);
+                    let gamepad = self.gilrs.gamepad(event.id);
+                    let device_name = gamepad.name().to_string();
+                    // Use raw code with high bit set to distinguish from regular axes
+                    let axis_code = code.into_u32() | 0x80000000;
+
+                    log::debug!("Analog button/slider: {:?} (raw code: {}, mapped: {:#x}) = {} on {}",
+                               button, code.into_u32(), axis_code, value, device_name);
+
+                    self.state
+                        .axes
+                        .entry(device_id.clone())
+                        .or_default()
+                        .insert(axis_code, value);
+
+                    events.push(InputEvent::AxisMoved {
+                        device_id,
+                        device_name,
+                        axis_code,
+                        value,
+                    });
+                }
+                EventType::ButtonPressed(button, code) => {
                     let device_id = format!("{:?}", event.id);
                     let gamepad = self.gilrs.gamepad(event.id);
                     let device_name = gamepad.name().to_string();
                     let button_code = code.into_u32();
+
+                    log::debug!("Button pressed: {:?} (code: {}) on {}", button, button_code, device_name);
 
                     self.state
                         .buttons
@@ -221,11 +362,13 @@ impl InputReader {
                         button_code,
                     });
                 }
-                EventType::ButtonReleased(_button, code) => {
+                EventType::ButtonReleased(button, code) => {
                     let device_id = format!("{:?}", event.id);
                     let gamepad = self.gilrs.gamepad(event.id);
                     let device_name = gamepad.name().to_string();
                     let button_code = code.into_u32();
+
+                    log::debug!("Button released: {:?} (code: {}) on {}", button, button_code, device_name);
 
                     self.state
                         .buttons

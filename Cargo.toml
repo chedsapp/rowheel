@@ -6,11 +6,11 @@ description = "Emulate Xbox controllers through DirectInput devices like steerin
 
 [dependencies]
 # UI
-eframe = "0.29"
-egui = "0.29"
+eframe = "0.33"
+egui = "0.33"
 
 # Input handling
-gilrs = "0.11"
+gilrs = "0.11.1"
 
 # Serialization for config
 serde = { version = "1.0", features = ["derive"] }
@@ -28,11 +28,15 @@ anyhow = "1.0"
 crossbeam-channel = "0.5"
 
 [target.'cfg(windows)'.dependencies]
-vigem-client = "0.1"
-windows = { version = "0.58", features = [
+vigem-client = { version = "0.1", features = ["unstable_xtarget_notification"] }
+windows = { version = "0.62.0", features = [
     "Win32_Foundation",
     "Win32_Devices_HumanInterfaceDevice",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_System_LibraryLoader",
     "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
 ]}
 
 [target.'cfg(target_os = "linux")'.dependencies]

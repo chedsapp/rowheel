@@ -11,8 +11,6 @@ pub enum AppMode {
     Calibrating,
     /// Normal operation - mapping inputs to virtual controller
     Running,
-    /// Error state
-    Error(String),
 }
 
 pub struct RoWheelApp {
@@ -105,10 +103,10 @@ impl RoWheelApp {
             match VirtualXboxController::new() {
                 Ok(vc) => {
                     self.virtual_controller = Some(Box::new(vc));
-                    self.status_message = "Virtual Xbox controller connected!".to_string();
+                    self.status_message = "Gamepad connected".to_string();
                 }
                 Err(e) => {
-                    self.status_message = format!("Failed to create virtual controller: {}", e);
+                    self.status_message = format!("Failed to create gamepad: {}", e);
                     log::error!("{}", self.status_message);
                 }
             }
@@ -214,6 +212,11 @@ impl RoWheelApp {
 
                     // Get rumble and apply force feedback
                     if let Ok(rumble) = vc.get_rumble() {
+                        // Only log when there's actual rumble to avoid spam
+                        if rumble.large_motor > 0.01 || rumble.small_motor > 0.01 {
+                            log::info!("Rumble from game: large={:.2}, small={:.2}",
+                                       rumble.large_motor, rumble.small_motor);
+                        }
                         if let Some(ref mut ff) = self.force_feedback {
                             if let Err(e) = ff.apply_rumble(&rumble) {
                                 log::error!("Failed to apply force feedback: {}", e);
@@ -233,7 +236,7 @@ impl RoWheelApp {
                 ui.add_space(30.0);
 
                 if let Some(ref calibration) = self.calibration {
-                    // Progress indicator
+                    // This is probably the worst way to do the progress indicator lol
                     let progress = match calibration.step {
                         CalibrationStep::Welcome => 0.0,
                         CalibrationStep::SteeringLeft => 0.1,
@@ -293,14 +296,14 @@ impl RoWheelApp {
                             self.finish_calibration();
                         }
                     } else if self.calibration.is_some() {
-                        if ui.button(egui::RichText::new("NEXT").size(18.0)).clicked() {
+                        if ui.button(egui::RichText::new("Next").size(18.0)).clicked() {
                             if let Some(ref mut cal) = self.calibration {
                                 cal.advance();
                             }
                         }
 
                         if can_skip {
-                            if ui.button(egui::RichText::new("SKIP").size(18.0)).clicked() {
+                            if ui.button(egui::RichText::new("Skip").size(18.0)).clicked() {
                                 if let Some(ref mut cal) = self.calibration {
                                     cal.skip();
                                 }
@@ -324,9 +327,9 @@ impl RoWheelApp {
                 ui.checkbox(&mut self.show_debug, "Debug");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let status = if self.virtual_controller.as_ref().map(|vc| vc.is_connected()).unwrap_or(false) {
-                        egui::RichText::new("● Connected").color(egui::Color32::GREEN)
+                        egui::RichText::new("Connected").color(egui::Color32::GREEN)
                     } else {
-                        egui::RichText::new("● Disconnected").color(egui::Color32::RED)
+                        egui::RichText::new("Disconnected").color(egui::Color32::RED)
                     };
                     ui.label(status);
                 });
@@ -340,7 +343,7 @@ impl RoWheelApp {
             }
 
             // Virtual controller visualization
-            ui.heading("Virtual Xbox Controller Output");
+            ui.heading("Gamepad Output");
             ui.add_space(10.0);
 
             ui.columns(2, |columns| {
@@ -405,7 +408,7 @@ impl RoWheelApp {
                                 .and_then(|r| r.state().get_axis(&s.device_id, s.axis_code));
                             ui.label(format!("Steering: axis {} cal=[{:.6}, {:.6}]",
                                 s.axis_code, s.min_value, s.max_value));
-                            ui.label(format!("  raw={:.6} → out={:.6}",
+                            ui.label(format!("  raw={:.6} out={:.6}",
                                 raw_value.unwrap_or(0.0), self.current_state.left_stick_x));
                         }
                         if let Some(ref t) = config.throttle {
@@ -457,25 +460,13 @@ impl RoWheelApp {
 
 impl eframe::App for RoWheelApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Process inputs every frame
+        
         self.process_inputs();
-
-        // Request continuous repaints for real-time input
         ctx.request_repaint();
 
         match self.mode {
             AppMode::Calibrating => self.render_calibration_ui(ctx),
             AppMode::Running => self.render_running_ui(ctx),
-            AppMode::Error(ref msg) => {
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(50.0);
-                        ui.label(egui::RichText::new("Error").size(32.0).color(egui::Color32::RED));
-                        ui.add_space(20.0);
-                        ui.label(msg);
-                    });
-                });
-            }
         }
     }
 }
