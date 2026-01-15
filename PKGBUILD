@@ -9,7 +9,7 @@ license=('MIT')
 depends=('systemd-libs' 'libxkbcommon' 'libxcb' 'mesa')
 makedepends=('cargo')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/chedsapp/rowheel/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('47724fdc102667bf43d3276a936f6ebf84b00693e632ef56ff9b88546641140a')
 
 prepare() {
     cd "$pkgname-$pkgver"
