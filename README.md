@@ -8,6 +8,12 @@ This should theoretically work with any wheel.
 
 <img width="503" height="442" alt="image" src="https://github.com/user-attachments/assets/b2a4a2e4-8b18-4a5f-a549-1f600b370448" /> <img width="490" height="442" alt="image" src="https://github.com/user-attachments/assets/d5cd6f5c-4c97-45c0-8bfa-31869f3c93a2" />
 
+## Installation (Arch & friends)
+
+Install the [rowheel](https://aur.archlinux.org/packages/rowheel)<sup>AUR</sup> package with your preferred AUR helper.
+
+<sup>(maintained by [chedsapp](https://aur.archlinux.org/account/chedsapp))</sup>
+
 ## Building
 
 ### Prerequisites
